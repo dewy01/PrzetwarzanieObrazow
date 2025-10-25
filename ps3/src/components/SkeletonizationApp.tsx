@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react"
 
 const MAX_CANVAS_SIZE = 500
 
-// ========== ZHANG–SUEN ALGORITHM ==========
 const ZhangSuenStep = (
   bin: Uint8Array,
   width: number,
@@ -73,7 +72,6 @@ const zhangSuen = (bin: Uint8Array, width: number, height: number) => {
   return bin
 }
 
-// ========== K3M ALGORITHM ==========
 const K3M = (bin: Uint8Array, width: number, height: number) => {
   const get = (x: number, y: number) =>
     x < 0 || y < 0 || x >= width || y >= height ? 0 : bin[y * width + x]
@@ -132,7 +130,6 @@ const K3M = (bin: Uint8Array, width: number, height: number) => {
   return bin
 }
 
-// ========== HELPERS ==========
 const binarize = (imgData: ImageData) => {
   const bin = new Uint8Array(imgData.width * imgData.height)
   for (let i = 0; i < imgData.width * imgData.height; i++) {
@@ -165,7 +162,6 @@ const drawBinary = (
   ctx.putImageData(imgData, 0, 0)
 }
 
-// ========== MAIN REACT COMPONENT ==========
 type SkeletonizationType = "Zhang-Suen" | "K3M"
 
 export const SkeletonizationApp: React.FC = () => {
