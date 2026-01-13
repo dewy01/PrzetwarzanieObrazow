@@ -1,0 +1,258 @@
+﻿<Window x:Class="MapEditor.Presentation.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:MapEditor.Presentation"
+        xmlns:controls="clr-namespace:MapEditor.Presentation.Controls"
+        mc:Ignorable="d"
+        Title="Map Editor - Biometric Analysis"
+        Height="700"
+        Width="1200">
+
+    <Window.InputBindings>
+        <KeyBinding Key="Z"
+                    Modifiers="Control"
+                    Command="{Binding UndoCommand}"/>
+        <KeyBinding Key="Y"
+                    Modifiers="Control"
+                    Command="{Binding RedoCommand}"/>
+    </Window.InputBindings>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Menu Bar -->
+        <Menu Grid.Row="0">
+            <MenuItem Header="_File">
+                <MenuItem Header="_New Workspace"
+                          Command="{Binding NewWorkspaceCommand}"/>
+                <MenuItem Header="_Open..."
+                          Command="{Binding LoadWorkspaceCommand}"/>
+                <MenuItem Header="_Save"
+                          Command="{Binding SaveWorkspaceCommand}"/>
+                <Separator/>
+                <MenuItem Header="_Import Image → Preset"
+                          Command="{Binding ImportImageCommand}"/>
+                <Separator/>
+                <MenuItem Header="E_xit"
+                          Command="{Binding ExitCommand}"/>
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="_Undo"
+                          Command="{Binding UndoCommand}"
+                          InputGestureText="Ctrl+Z"/>
+                <MenuItem Header="_Redo"
+                          Command="{Binding RedoCommand}"
+                          InputGestureText="Ctrl+Y"/>
+            </MenuItem>
+            <MenuItem Header="_Tools">
+                <MenuItem Header="Fill Tool"
+                          IsCheckable="True"
+                          IsChecked="{Binding IsFillModeEnabled, Mode=OneWay}"
+                          Command="{Binding ToggleFillModeCommand}"/>
+                <MenuItem Header="Entity Tool"
+                          IsCheckable="True"
+                          IsChecked="{Binding IsEntityModeEnabled, Mode=OneWay}"
+                          Command="{Binding ToggleEntityModeCommand}"/>
+                <MenuItem Header="Preset Tool"
+                          IsCheckable="True"
+                          IsChecked="{Binding IsPresetModeEnabled, Mode=OneWay}"
+                          Command="{Binding TogglePresetModeCommand}"/>
+                <Separator/>
+                <MenuItem Header="Real-time Preview"
+                          IsCheckable="True"
+                          IsChecked="{Binding IsLivePreviewEnabled}">
+                    <MenuItem.Icon>
+                        <Ellipse Fill="LightGreen"
+                                 Width="10"
+                                 Height="10"
+                                 Visibility="{Binding IsLivePreviewEnabled, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+            </MenuItem>
+            <MenuItem Header="_Biometrics">
+                <MenuItem Header="Show UL22 Matrix"
+                          Command="{Binding ShowUL22MatrixCommand}"/>
+                <MenuItem Header="Preprocess (Median + Otsu)"
+                          Command="{Binding PreprocessMatrixCommand}"
+                          IsEnabled="{Binding IsLoading, Converter={StaticResource InvertBoolConverter}}"/>
+                <MenuItem Header="Run Fragmentation"
+                          Command="{Binding RunFragmentationCommand}"
+                          IsEnabled="{Binding IsLoading, Converter={StaticResource InvertBoolConverter}}"/>
+                <Separator/>
+                <MenuItem Header="Skeletonization (Zhang-Suen)"
+                          Command="{Binding RunSkeletonizationCommand}"
+                          IsEnabled="{Binding IsLoading, Converter={StaticResource InvertBoolConverter}}"/>
+                <MenuItem Header="Skeletonization (K3M)"
+                          Command="{Binding RunK3MSkeletonizationCommand}"
+                          IsEnabled="{Binding IsLoading, Converter={StaticResource InvertBoolConverter}}"/>
+                <Separator/>
+                <MenuItem Header="Branch Detection"
+                          Command="{Binding RunBranchDetectionCommand}"
+                          IsEnabled="{Binding IsLoading, Converter={StaticResource InvertBoolConverter}}"/>
+                <Separator/>
+                <MenuItem Header="Show Grid Features"
+                          Command="{Binding ShowGridFeaturesCommand}"/>
+                <Separator/>
+                <MenuItem Header="Clear Skeleton Overlay"
+                          Command="{Binding ClearSkeletonCommand}"/>
+                <MenuItem Header="Show Skeleton Overlay"
+                          IsCheckable="True"
+                          IsChecked="{Binding IsSkeletonOverlayVisible}"/>
+                <Separator/>
+                <MenuItem Header="Branch Point Highlights">
+                    <MenuItem Header="Show Endpoints (Green)"
+                              IsCheckable="True"
+                              IsChecked="{Binding ShowEndpoints}"/>
+                    <MenuItem Header="Show Bifurcations (Yellow)"
+                              IsCheckable="True"
+                              IsChecked="{Binding ShowBifurcations}"/>
+                    <MenuItem Header="Show Crossings (Red)"
+                              IsCheckable="True"
+                              IsChecked="{Binding ShowCrossings}"/>
+                    <Separator/>
+                    <MenuItem Header="Show Annotations"
+                              IsCheckable="True"
+                              IsChecked="{Binding ShowBranchAnnotations}"/>
+                </MenuItem>
+            </MenuItem>
+        </Menu>
+
+        <!-- Main Content -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="250"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Toolbar Panel -->
+            <Border Grid.Column="0"
+                    BorderBrush="Gray"
+                    BorderThickness="0,0,1,0"
+                    Padding="10">
+                <ScrollViewer Grid.Column="1"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+
+                        <TextBlock Text="Workspace"
+                                   FontWeight="Bold"
+                                   FontSize="16"
+                                   Margin="0,0,0,10"/>
+                        <TextBlock Text="{Binding WorkspaceName}"
+                                   Margin="0,0,0,20"/>
+
+                        <TextBlock Text="Square Types"
+                                   FontWeight="Bold"
+                                   Margin="0,10,0,5"/>
+                        <ListBox ItemsSource="{Binding AvailableSquareTypes}"
+                                 SelectedItem="{Binding SelectedSquareType}"
+                                 Height="120"/>
+
+                        <TextBlock Text="Entity Types"
+                                   FontWeight="Bold"
+                                   Margin="0,15,0,5"
+                                   Visibility="{Binding IsEntityModeEnabled, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                        <ListBox ItemsSource="{Binding AvailableEntityTypes}"
+                                 SelectedItem="{Binding SelectedEntityType}"
+                                 Height="120"
+                                 Margin="0,0,0,10"
+                                 Visibility="{Binding IsEntityModeEnabled, Converter={StaticResource BoolToVisibilityConverter}}"/>
+
+                        <TextBlock Text="Presets"
+                                   FontWeight="Bold"
+                                   Margin="0,15,0,5"
+                                   Visibility="{Binding IsPresetModeEnabled, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                        <Button Content="Load Presets"
+                                Command="{Binding LoadPresetsCommand}"
+                                Margin="0,0,0,5"
+                                Visibility="{Binding IsPresetModeEnabled, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                        <ListBox ItemsSource="{Binding AvailablePresets}"
+                                 SelectedItem="{Binding SelectedPreset}"
+                                 Height="150"
+                                 Visibility="{Binding IsPresetModeEnabled, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontWeight="Bold"/>
+                                        <TextBlock Text="{Binding Size, StringFormat='Size: {0}'}"
+                                                   FontSize="10"
+                                                   Foreground="Gray"/>
+                                        <TextBlock FontSize="10"
+                                                   Foreground="Gray">
+                                        <Run Text="Squares:"/>
+                                        <Run Text="{Binding Squares.Count, Mode=OneWay}"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <TextBlock Text="Groups (Layers)"
+                                   FontWeight="Bold"
+                                   Margin="0,15,0,5"/>
+                        <ComboBox ItemsSource="{Binding AvailableGroups}"
+                                  SelectedItem="{Binding SelectedGroup}"
+                                  DisplayMemberPath="Name"
+                                  Margin="0,0,0,5"/>
+                        <TextBlock Text="{Binding ActiveGroupName, StringFormat='Active: {0}'}"
+                                   Foreground="DarkGreen"
+                                   FontStyle="Italic"
+                                   FontSize="11"
+                                   Margin="0,0,0,5"/>
+                        <Button Content="Add Group"
+                                Command="{Binding AddGroupCommand}"
+                                Margin="0,0,0,10"/>
+
+
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Grid Canvas -->
+            <ScrollViewer Grid.Column="1"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto">
+                <controls:GridCanvas x:Name="GridCanvas"
+                                     Workspace="{Binding CurrentWorkspace}"
+                                     SkeletonMatrix="{Binding SkeletonMatrix}"
+                                     IsSkeletonOverlayVisible="{Binding IsSkeletonOverlayVisible}"
+                                     Endpoints="{Binding Endpoints}"
+                                     Bifurcations="{Binding Bifurcations}"
+                                     Crossings="{Binding Crossings}"
+                                     ShowEndpoints="{Binding ShowEndpoints}"
+                                     ShowBifurcations="{Binding ShowBifurcations}"
+                                     ShowCrossings="{Binding ShowCrossings}"
+                                     ShowBranchAnnotations="{Binding ShowBranchAnnotations}"
+                                     Margin="20"/>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Status Bar -->
+        <StatusBar Grid.Row="2">
+            <StatusBarItem>
+                <TextBlock Text="{Binding StatusMessage}"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <StackPanel Orientation="Horizontal"
+                            Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <ProgressBar Width="100"
+                                 Height="16"
+                                 IsIndeterminate="True"
+                                 Margin="0,0,10,0"/>
+                    <TextBlock Text="Processing..."
+                               VerticalAlignment="Center"
+                               Foreground="DarkGreen"
+                               FontStyle="Italic"/>
+                </StackPanel>
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+</Window>

@@ -1,0 +1,105 @@
+# .gitignore - Edytor Map
+
+# Pliki tymczasowe systemu operacyjnego
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE i edytory
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.code-workspace
+
+# Pliki kompilacji i build
+bin/
+obj/
+out/
+build/
+dist/
+target/
+*.exe
+*.dll
+*.so
+*.dylib
+*.class
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+
+# Dependency directories
+node_modules/
+packages/
+vendor/
+venv/
+env/
+.env
+
+# Logi i cache
+*.log
+logs/
+.cache/
+*.tmp
+*.temp
+
+# Workspace user files (zachowaj tylko przykładowe)
+*.workspace
+!assets/ExampleMaps/*.workspace
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# Package files
+*.zip
+*.tar.gz
+*.rar
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Specyficzne dla technologii
+# C# / .NET
+*.user
+*.suo
+*.cache
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Python
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+pip-log.txt
+
+# Java
+*.jar
+!lib/*.jar
+*.war
+*.ear
+hs_err_pid*
+
+# JavaScript/TypeScript
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.eslintcache
+
+# Large test files (commit tylko małe przykłady)
+tests/TestData/Images/*.jpg
+tests/TestData/Images/*.png
+!tests/TestData/Images/sample_*.png
+!tests/TestData/Images/example_*.jpg
