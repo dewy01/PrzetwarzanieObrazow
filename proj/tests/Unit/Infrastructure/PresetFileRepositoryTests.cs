@@ -114,7 +114,7 @@ public class PresetFileRepositoryTests
             new SquareDefinition(new Point(2, 0), SquareType.Stone)
         };
 
-        return new Preset(name, new Size(3, 1), squares, new Point(5, 5));
+        return new Preset(name, new Size(3, 1), squares, null, new Point(5, 5));
     }
 
     public void Dispose()

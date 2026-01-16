@@ -67,6 +67,16 @@ public class EditingService
         OnWorkspaceChanged();
     }
 
+    public void PlaceSquare(int x, int y, SquareType squareType, int rotation)
+    {
+        if (_currentWorkspace == null)
+            throw new InvalidOperationException("No workspace loaded");
+
+        var command = new PlaceSquareCommand(_currentWorkspace, new Point(x, y), squareType, rotation);
+        _undoRedoService.ExecuteCommand(command);
+        OnWorkspaceChanged();
+    }
+
     public void RemoveSquare(int x, int y)
     {
         if (_currentWorkspace == null)
@@ -96,6 +106,19 @@ public class EditingService
         OnWorkspaceChanged();
     }
 
+    public void RemoveGroup(Group group)
+    {
+        if (_currentWorkspace == null)
+            throw new InvalidOperationException("No workspace loaded");
+
+        if (_currentWorkspace.Groups.Count <= 1)
+            throw new InvalidOperationException("Cannot remove the last group from workspace");
+
+        var command = new RemoveGroupCommand(_currentWorkspace, group);
+        _undoRedoService.ExecuteCommand(command);
+        OnWorkspaceChanged();
+    }
+
     public void PlaceEntity(int x, int y, Domain.Shared.Enums.EntityType entityType, string? name = null)
     {
         if (_currentWorkspace == null)
@@ -122,14 +145,15 @@ public class EditingService
             throw new InvalidOperationException("No workspace loaded");
 
         var clickPosition = new Point(x, y);
+        var activeGroup = _currentWorkspace.ActiveGroup;
         var grid = _currentWorkspace.Grid;
-        var cell = grid.GetCell(clickPosition);
 
-        // If clicking on a filled square, use flood fill for same square type
-        if (!cell.IsEmpty && cell.Square != null)
+        // Check if clicking on a filled square in the active group
+        var existingSquare = activeGroup.GetSquare(clickPosition);
+        if (existingSquare != null)
         {
-            var targetType = cell.Square.Type;
-            var positions = FloodFillSameType(x, y, targetType, grid);
+            var targetType = existingSquare.Type;
+            var positions = FloodFillSameType(x, y, targetType, activeGroup, grid);
 
             if (positions.Count > 0)
             {
@@ -140,8 +164,8 @@ public class EditingService
             return;
         }
 
-        // If clicking on empty space, use flood fill for empty cells
-        var emptyPositions = FloodFillEmpty(x, y, grid);
+        // If clicking on empty space in active group, use flood fill for empty cells
+        var emptyPositions = FloodFillEmpty(x, y, activeGroup, grid);
 
         if (emptyPositions.Count > 0)
         {
@@ -152,9 +176,9 @@ public class EditingService
     }
 
     /// <summary>
-    /// Flood fill that only includes connected cells of the same square type (8-connectivity)
+    /// Flood fill that only includes connected cells of the same square type in active group (8-connectivity)
     /// </summary>
-    private List<Point> FloodFillSameType(int startX, int startY, SquareType targetType, Grid2D grid)
+    private List<Point> FloodFillSameType(int startX, int startY, SquareType targetType, Group activeGroup, Grid2D grid)
     {
         var positions = new List<Point>();
         var visited = new HashSet<Point>();
@@ -178,10 +202,10 @@ public class EditingService
                     continue;
 
                 visited.Add(neighbor);
-                var neighborCell = grid.GetCell(neighbor);
+                var neighborSquare = activeGroup.GetSquare(neighbor);
 
-                // Only include if it has the same square type
-                if (!neighborCell.IsEmpty && neighborCell.Square?.Type == targetType)
+                // Only include if it has the same square type in active group
+                if (neighborSquare != null && neighborSquare.Type == targetType)
                 {
                     queue.Enqueue(neighbor);
                 }
@@ -192,18 +216,17 @@ public class EditingService
     }
 
     /// <summary>
-    /// Flood fill that only includes connected empty cells (4-connectivity)
+    /// Flood fill that only includes connected empty cells in active group (4-connectivity)
     /// </summary>
-    private List<Point> FloodFillEmpty(int startX, int startY, Grid2D grid)
+    private List<Point> FloodFillEmpty(int startX, int startY, Group activeGroup, Grid2D grid)
     {
         var positions = new List<Point>();
         var visited = new HashSet<Point>();
         var queue = new Queue<Point>();
         var startPoint = new Point(startX, startY);
 
-        // Don't fill if starting point is not empty
-        var startCell = grid.GetCell(startPoint);
-        if (!startCell.IsEmpty)
+        // Don't fill if starting point is not empty in active group
+        if (activeGroup.HasSquare(startPoint))
             return positions;
 
         queue.Enqueue(startPoint);
@@ -223,10 +246,9 @@ public class EditingService
                     continue;
 
                 visited.Add(neighbor);
-                var neighborCell = grid.GetCell(neighbor);
 
-                // Only include if it's empty
-                if (neighborCell.IsEmpty)
+                // Only include if it's empty in active group
+                if (!activeGroup.HasSquare(neighbor))
                 {
                     queue.Enqueue(neighbor);
                 }

@@ -197,6 +197,6 @@ public class ImageImportService : IImageImportService
         var size = new Domain.Editing.ValueObjects.Size(width, height);
         var origin = new Domain.Editing.ValueObjects.Point(0, 0);
 
-        return new Preset(presetName, size, squares, origin);
+        return new Preset(presetName, size, squares, null, origin);
     }
 }

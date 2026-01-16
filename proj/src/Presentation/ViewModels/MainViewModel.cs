@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -7,10 +8,13 @@ using System.Windows.Input;
 using MapEditor.Application.Services;
 using MapEditor.Domain.Biometric.Services;
 using MapEditor.Domain.Editing.Entities;
+using MapEditor.Domain.Editing.ValueObjects;
 using MapEditor.Domain.Shared.Enums;
 using MapEditor.Presentation.Commands;
 using Microsoft.Win32;
 using MapEditor.Domain.Editing.Services;
+using System.Collections.Generic;
+using MapEditor.Domain.Biometric.ValueObjects;
 
 namespace MapEditor.Presentation.ViewModels;
 
@@ -27,8 +31,10 @@ public class MainViewModel : ViewModelBase
     private readonly IBranchDetectionService _branchDetectionService;
     private readonly IImageImportService _imageImportService;
     private readonly IPresetRepository _presetRepository;
+    private readonly IGridFeaturesService _gridFeaturesService;
     private Workspace? _currentWorkspace;
     private SquareType _selectedSquareType = SquareType.Grass;
+    private int _currentSquareRotation = 0;  // 0, 90, 180, 270 degrees
     private string _statusMessage = "Ready";
     private bool _isFillModeEnabled = false;
     private bool _isEntityModeEnabled = false;
@@ -47,8 +53,11 @@ public class MainViewModel : ViewModelBase
     private Domain.Shared.Enums.EntityType _selectedEntityType = Domain.Shared.Enums.EntityType.Player;
     private Group? _selectedGroup;
     private Preset? _selectedPreset;
+    private int _selectionWidth = 0;
+    private int _selectionHeight = 0;
+    private int _selectionArea = 0;
 
-    public MainViewModel(EditingService editingService, IUL22Converter ul22Converter, IPreprocessingService preprocessingService, IFragmentationService fragmentationService, ISkeletonizationService skeletonizationService, IBranchDetectionService branchDetectionService, IImageImportService imageImportService, IPresetRepository presetRepository)
+    public MainViewModel(EditingService editingService, IUL22Converter ul22Converter, IPreprocessingService preprocessingService, IFragmentationService fragmentationService, ISkeletonizationService skeletonizationService, IBranchDetectionService branchDetectionService, IImageImportService imageImportService, IPresetRepository presetRepository, IGridFeaturesService gridFeaturesService)
     {
         _editingService = editingService ?? throw new ArgumentNullException(nameof(editingService));
         _ul22Converter = ul22Converter ?? throw new ArgumentNullException(nameof(ul22Converter));
@@ -58,6 +67,7 @@ public class MainViewModel : ViewModelBase
         _branchDetectionService = branchDetectionService ?? throw new ArgumentNullException(nameof(branchDetectionService));
         _imageImportService = imageImportService ?? throw new ArgumentNullException(nameof(imageImportService));
         _presetRepository = presetRepository ?? throw new ArgumentNullException(nameof(presetRepository));
+        _gridFeaturesService = gridFeaturesService ?? throw new ArgumentNullException(nameof(gridFeaturesService));
         _editingService.WorkspaceChanged += OnWorkspaceChanged;
 
         // Commands
@@ -73,15 +83,30 @@ public class MainViewModel : ViewModelBase
         RunK3MSkeletonizationCommand = new AsyncRelayCommand(_ => ExecuteRunK3MSkeletonizationAsync(), _ => CurrentWorkspace != null);
         RunBranchDetectionCommand = new AsyncRelayCommand(_ => ExecuteRunBranchDetectionAsync(), _ => CurrentWorkspace != null);
         ClearSkeletonCommand = new RelayCommand(_ => ExecuteClearSkeleton(), _ => SkeletonMatrix != null);
+        ClearBranchDetectionCommand = new RelayCommand(_ => ExecuteClearBranchDetection(), _ => Endpoints != null || Bifurcations != null || Crossings != null);
         ShowGridFeaturesCommand = new RelayCommand(_ => ExecuteShowGridFeatures(), _ => CurrentWorkspace != null);
         ToggleFillModeCommand = new RelayCommand(_ => ExecuteToggleFillMode());
         ToggleEntityModeCommand = new RelayCommand(_ => ExecuteToggleEntityMode());
         TogglePresetModeCommand = new RelayCommand(_ => ExecuteTogglePresetMode());
         LoadPresetsCommand = new RelayCommand(_ => ExecuteLoadPresets());
+        RotateSquareToolLeftCommand = new RelayCommand(_ => ExecuteRotateSquareToolLeft());
+        RotateSquareToolRightCommand = new RelayCommand(_ => ExecuteRotateSquareToolRight());
         ChangeGroupCommand = new RelayCommand(ExecuteChangeGroup, _ => CurrentWorkspace != null);
         AddGroupCommand = new RelayCommand(_ => ExecuteAddGroup(), _ => CurrentWorkspace != null);
+        RemoveGroupCommand = new RelayCommand(_ => ExecuteRemoveGroup(), _ => CurrentWorkspace?.Groups.Count > 1);
+        ExportGroupAsPresetCommand = new RelayCommand(_ => ExecuteExportGroupAsPreset(), _ => CurrentWorkspace != null);
         ImportImageCommand = new RelayCommand(_ => ExecuteImportImage());
         ExitCommand = new RelayCommand(_ => System.Windows.Application.Current.Shutdown());
+
+        // Selection commands
+        SelectAllCommand = new RelayCommand(_ => ExecuteSelectAll(), _ => CurrentWorkspace != null);
+        ClearSelectionCommand = new RelayCommand(_ => ExecuteClearSelection(), _ => (CurrentWorkspace?.Selection.IsActive ?? false));
+        DeleteSelectedCommand = new RelayCommand(_ => ExecuteDeleteSelected(), _ => (CurrentWorkspace?.Selection.IsActive ?? false));
+        FillSelectedCommand = new RelayCommand(_ => ExecuteFillSelected(), _ => (CurrentWorkspace?.Selection.IsActive ?? false));
+        MoveSelectionLeftCommand = new RelayCommand(_ => ExecuteMoveSelection(-1, 0), _ => (CurrentWorkspace?.Selection.IsActive ?? false));
+        MoveSelectionRightCommand = new RelayCommand(_ => ExecuteMoveSelection(1, 0), _ => (CurrentWorkspace?.Selection.IsActive ?? false));
+        MoveSelectionUpCommand = new RelayCommand(_ => ExecuteMoveSelection(0, -1), _ => (CurrentWorkspace?.Selection.IsActive ?? false));
+        MoveSelectionDownCommand = new RelayCommand(_ => ExecuteMoveSelection(0, 1), _ => (CurrentWorkspace?.Selection.IsActive ?? false));
 
         // Square types dla UI
         AvailableSquareTypes = new ObservableCollection<SquareType>(
@@ -106,6 +131,25 @@ public class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(WorkspaceName));
             }
         }
+
+    }
+
+    public int SelectionWidth
+    {
+        get => _selectionWidth;
+        set => SetProperty(ref _selectionWidth, value);
+    }
+
+    public int SelectionHeight
+    {
+        get => _selectionHeight;
+        set => SetProperty(ref _selectionHeight, value);
+    }
+
+    public int SelectionArea
+    {
+        get => _selectionArea;
+        set => SetProperty(ref _selectionArea, value);
     }
 
     public int GridWidth => CurrentWorkspace?.Grid.Size.Width ?? 0;
@@ -117,6 +161,14 @@ public class MainViewModel : ViewModelBase
         get => _selectedSquareType;
         set => SetProperty(ref _selectedSquareType, value);
     }
+
+    public int CurrentSquareRotation
+    {
+        get => _currentSquareRotation;
+        set => SetProperty(ref _currentSquareRotation, value);
+    }
+
+    public string RotationDisplay => $"{CurrentSquareRotation}°";
 
     public string StatusMessage
     {
@@ -319,15 +371,28 @@ public class MainViewModel : ViewModelBase
     public ICommand RunK3MSkeletonizationCommand { get; }
     public ICommand RunBranchDetectionCommand { get; }
     public ICommand ClearSkeletonCommand { get; }
+    public ICommand ClearBranchDetectionCommand { get; }
     public ICommand ShowGridFeaturesCommand { get; }
     public ICommand ToggleFillModeCommand { get; }
     public ICommand ToggleEntityModeCommand { get; }
     public ICommand TogglePresetModeCommand { get; }
     public ICommand LoadPresetsCommand { get; }
+    public ICommand RotateSquareToolLeftCommand { get; }
+    public ICommand RotateSquareToolRightCommand { get; }
     public ICommand ChangeGroupCommand { get; }
     public ICommand AddGroupCommand { get; }
+    public ICommand RemoveGroupCommand { get; }
+    public ICommand ExportGroupAsPresetCommand { get; }
     public ICommand ImportImageCommand { get; }
     public ICommand ExitCommand { get; }
+    public ICommand SelectAllCommand { get; }
+    public ICommand ClearSelectionCommand { get; }
+    public ICommand DeleteSelectedCommand { get; }
+    public ICommand FillSelectedCommand { get; }
+    public ICommand MoveSelectionLeftCommand { get; }
+    public ICommand MoveSelectionRightCommand { get; }
+    public ICommand MoveSelectionUpCommand { get; }
+    public ICommand MoveSelectionDownCommand { get; }
 
     public void PlaceSquareAt(int x, int y)
     {
@@ -350,9 +415,12 @@ public class MainViewModel : ViewModelBase
             }
             else
             {
-                _editingService.PlaceSquare(x, y, SelectedSquareType);
-                StatusMessage = $"Placed {SelectedSquareType} at ({x}, {y})";
+                _editingService.PlaceSquare(x, y, SelectedSquareType, CurrentSquareRotation);
+                StatusMessage = $"Placed {SelectedSquareType} (rotation: {CurrentSquareRotation}°) at ({x}, {y})";
             }
+
+            // Update command states after any action
+            CommandManager.InvalidateRequerySuggested();
         }
         catch (Exception ex)
         {
@@ -372,6 +440,7 @@ public class MainViewModel : ViewModelBase
                 {
                     _editingService.RemoveEntity(x, y);
                     StatusMessage = $"Removed entity at ({x}, {y})";
+                    CommandManager.InvalidateRequerySuggested();
                     return;
                 }
             }
@@ -379,10 +448,100 @@ public class MainViewModel : ViewModelBase
             // Otherwise remove square
             _editingService.RemoveSquare(x, y);
             StatusMessage = $"Removed square at ({x}, {y})";
+            CommandManager.InvalidateRequerySuggested();
         }
         catch (Exception ex)
         {
             StatusMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private void ExecuteSelectAll()
+    {
+        try
+        {
+            CurrentWorkspace?.SelectAll();
+            var area = CurrentWorkspace?.Selection.Area ?? 0;
+            StatusMessage = $"Selected entire grid ({area} cells)";
+            GridRefreshRequested?.Invoke(this, EventArgs.Empty);
+            CommandManager.InvalidateRequerySuggested();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Selection failed: {ex.Message}";
+        }
+    }
+
+    private void ExecuteClearSelection()
+    {
+        try
+        {
+            CurrentWorkspace?.ClearSelection();
+            StatusMessage = "Selection cleared";
+            GridRefreshRequested?.Invoke(this, EventArgs.Empty);
+            CommandManager.InvalidateRequerySuggested();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Clear selection failed: {ex.Message}";
+        }
+    }
+
+    private void ExecuteDeleteSelected()
+    {
+        try
+        {
+            if (CurrentWorkspace == null)
+                return;
+
+            int deleted = CurrentWorkspace.DeleteSelectedSquares();
+            StatusMessage = deleted > 0 ? $"Deleted {deleted} squares in selection" : "No squares in selection to delete";
+            GridRefreshRequested?.Invoke(this, EventArgs.Empty);
+            CommandManager.InvalidateRequerySuggested();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Delete selection failed: {ex.Message}";
+        }
+    }
+
+    private void ExecuteFillSelected()
+    {
+        try
+        {
+            if (CurrentWorkspace == null)
+                return;
+
+            int filled = CurrentWorkspace.FillSelectedSquares(SelectedSquareType, CurrentSquareRotation);
+            StatusMessage = filled > 0
+                ? $"Filled {filled} cells in selection with {SelectedSquareType} ({CurrentSquareRotation}°)"
+                : "No cells to fill in selection";
+            GridRefreshRequested?.Invoke(this, EventArgs.Empty);
+            CommandManager.InvalidateRequerySuggested();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Fill selection failed: {ex.Message}";
+        }
+    }
+
+    private void ExecuteMoveSelection(int dx, int dy)
+    {
+        try
+        {
+            if (CurrentWorkspace == null)
+                return;
+
+            int moved = CurrentWorkspace.MoveSelectedSquares(dx, dy);
+            StatusMessage = moved > 0
+                ? $"Moved selection by ({dx},{dy}); moved {moved} squares"
+                : "Selection move aborted (bounds or empty)";
+            GridRefreshRequested?.Invoke(this, EventArgs.Empty);
+            CommandManager.InvalidateRequerySuggested();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Move selection failed: {ex.Message}";
         }
     }
 
@@ -468,6 +627,9 @@ public class MainViewModel : ViewModelBase
     {
         CurrentWorkspace = _editingService.CurrentWorkspace;
 
+        // Clear skeleton and branch detection on workspace change
+        ClearSkeletonAndBranches();
+
         // Update available groups
         AvailableGroups.Clear();
         if (CurrentWorkspace != null)
@@ -493,8 +655,11 @@ public class MainViewModel : ViewModelBase
         try
         {
             _editingService.Undo();
+            // Clear skeleton and branch detection on undo
+            ClearSkeletonAndBranches();
             StatusMessage = "Undo successful";
             GridRefreshRequested?.Invoke(this, EventArgs.Empty);
+            CommandManager.InvalidateRequerySuggested(); // Refresh command states
         }
         catch (Exception ex)
         {
@@ -507,8 +672,11 @@ public class MainViewModel : ViewModelBase
         try
         {
             _editingService.Redo();
+            // Clear skeleton and branch detection on redo
+            ClearSkeletonAndBranches();
             StatusMessage = "Redo successful";
             GridRefreshRequested?.Invoke(this, EventArgs.Empty);
+            CommandManager.InvalidateRequerySuggested(); // Refresh command states
         }
         catch (Exception ex)
         {
@@ -815,6 +983,9 @@ public class MainViewModel : ViewModelBase
             Bifurcations = (List<(int x, int y)>)branchAnalysis["Bifurcations"];
             Crossings = (List<(int x, int y)>)branchAnalysis["Crossings"];
 
+            // Update square tool rotation based on endpoint directions
+            UpdateSquareToolRotationFromBranchDetection(Endpoints);
+
             var sb = new StringBuilder();
             sb.AppendLine("Branch Detection Analysis");
             sb.AppendLine(new string('=', 50));
@@ -886,6 +1057,23 @@ public class MainViewModel : ViewModelBase
     {
         SkeletonMatrix = null;
         StatusMessage = "Skeleton overlay cleared";
+    }
+
+    private void ExecuteClearBranchDetection()
+    {
+        Endpoints = null;
+        Bifurcations = null;
+        Crossings = null;
+        StatusMessage = "Branch detection results cleared";
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void ClearSkeletonAndBranches()
+    {
+        SkeletonMatrix = null;
+        Endpoints = null;
+        Bifurcations = null;
+        Crossings = null;
     }
 
     private void ExecuteToggleFillMode()
@@ -980,6 +1168,8 @@ public class MainViewModel : ViewModelBase
             if (parameter is Group group && CurrentWorkspace != null)
             {
                 _editingService.SetActiveGroup(group);
+                // Clear skeleton and branch detection on group change
+                ClearSkeletonAndBranches();
                 StatusMessage = $"Switched to group: {group.Name}";
             }
         }
@@ -1064,6 +1254,186 @@ public class MainViewModel : ViewModelBase
         }
     }
 
+    private void ExecuteRemoveGroup()
+    {
+        try
+        {
+            if (CurrentWorkspace == null || SelectedGroup == null)
+                return;
+
+            if (CurrentWorkspace.Groups.Count <= 1)
+            {
+                MessageBox.Show("Cannot remove the last group.", "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var groupName = SelectedGroup.Name;
+            var result = MessageBox.Show(
+                $"Are you sure you want to remove group '{groupName}'?\nAll elements in this group will be deleted.",
+                "Remove Group",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                _editingService.RemoveGroup(SelectedGroup);
+                AvailableGroups.Remove(SelectedGroup);
+
+                // Select another group
+                if (AvailableGroups.Count > 0)
+                {
+                    SelectedGroup = AvailableGroups[0];
+                }
+
+                StatusMessage = $"Group '{groupName}' removed successfully";
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to remove group: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private void ExecuteExportGroupAsPreset()
+    {
+        try
+        {
+            if (CurrentWorkspace == null)
+                return;
+
+            var activeGroup = CurrentWorkspace.ActiveGroup;
+
+            if (activeGroup.Elements.Count == 0)
+            {
+                MessageBox.Show("Cannot export empty group. Please add some squares to the group first.",
+                    "Empty Group", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            // Prompt for preset name
+            var inputDialog = new System.Windows.Window
+            {
+                Title = "Export Group as Preset",
+                Width = 350,
+                Height = 160,
+                WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen,
+                ResizeMode = System.Windows.ResizeMode.NoResize,
+                ShowInTaskbar = false,
+                Owner = System.Windows.Application.Current.MainWindow
+            };
+
+            var mainGrid = new System.Windows.Controls.Grid();
+            mainGrid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = new System.Windows.GridLength(1, System.Windows.GridUnitType.Auto) });
+            mainGrid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = new System.Windows.GridLength(1, System.Windows.GridUnitType.Auto) });
+            mainGrid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = new System.Windows.GridLength(1, System.Windows.GridUnitType.Auto) });
+
+            var label = new System.Windows.Controls.Label { Content = "Preset Name:", Margin = new System.Windows.Thickness(10, 10, 10, 5) };
+            System.Windows.Controls.Grid.SetRow(label, 0);
+
+            var textBox = new System.Windows.Controls.TextBox
+            {
+                Margin = new System.Windows.Thickness(10, 0, 10, 10),
+                Padding = new System.Windows.Thickness(5),
+                Height = 30,
+                Text = $"{activeGroup.Name}_Preset"
+            };
+            System.Windows.Controls.Grid.SetRow(textBox, 1);
+            textBox.Focus();
+
+            var buttonPanel = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = System.Windows.HorizontalAlignment.Right, Margin = new System.Windows.Thickness(10) };
+            var okButton = new System.Windows.Controls.Button { Content = "OK", Width = 80, Padding = new System.Windows.Thickness(5), Margin = new System.Windows.Thickness(5, 0, 5, 0) };
+            var cancelButton = new System.Windows.Controls.Button { Content = "Cancel", Width = 80, Padding = new System.Windows.Thickness(5), Margin = new System.Windows.Thickness(5, 0, 0, 0) };
+
+            okButton.Click += (s, e) => inputDialog.DialogResult = true;
+            cancelButton.Click += (s, e) => { inputDialog.DialogResult = false; inputDialog.Close(); };
+
+            buttonPanel.Children.Add(okButton);
+            buttonPanel.Children.Add(cancelButton);
+            System.Windows.Controls.Grid.SetRow(buttonPanel, 2);
+
+            mainGrid.Children.Add(label);
+            mainGrid.Children.Add(textBox);
+            mainGrid.Children.Add(buttonPanel);
+
+            inputDialog.Content = mainGrid;
+
+            if (inputDialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                var presetName = textBox.Text.Trim();
+
+                // Calculate bounding box of all squares AND entities in group
+                var positions = new List<MapEditor.Domain.Editing.ValueObjects.Point>();
+                positions.AddRange(activeGroup.Elements.Keys);
+                positions.AddRange(activeGroup.Entities.Values.Select(e => e.Position));
+
+                if (positions.Count == 0)
+                    return;
+
+                int minX = positions.Min(p => p.X);
+                int maxX = positions.Max(p => p.X);
+                int minY = positions.Min(p => p.Y);
+                int maxY = positions.Max(p => p.Y);
+
+                int width = maxX - minX + 1;
+                int height = maxY - minY + 1;
+
+                // Create square definitions with relative positions
+                var squareDefs = new List<SquareDefinition>();
+                foreach (var kvp in activeGroup.Elements)
+                {
+                    var square = kvp.Value;
+                    var relativePos = new MapEditor.Domain.Editing.ValueObjects.Point(square.Position.X - minX, square.Position.Y - minY);
+                    squareDefs.Add(new SquareDefinition(relativePos, square.Type, square.Rotation));
+                }
+
+                // Create entity definitions with relative positions
+                var entityDefs = new List<EntityDefinition>();
+                foreach (var entity in activeGroup.Entities.Values)
+                {
+                    var relativePos = new MapEditor.Domain.Editing.ValueObjects.Point(entity.Position.X - minX, entity.Position.Y - minY);
+                    entityDefs.Add(new EntityDefinition(relativePos, entity.Type, entity.Name));
+                }
+
+                // Create preset with both squares and entities
+                var preset = new Preset(presetName, new MapEditor.Domain.Editing.ValueObjects.Size(width, height), squareDefs, entityDefs);
+
+                // Save preset
+                var saveDialog = new SaveFileDialog
+                {
+                    Title = "Save Preset",
+                    Filter = "Preset Files (*.preset.json)|*.preset.json|All Files (*.*)|*.*",
+                    FileName = $"{presetName}.preset.json"
+                };
+
+                if (saveDialog.ShowDialog() == true)
+                {
+                    // Save preset asynchronously without blocking UI
+                    _ = _presetRepository.SaveAsync(preset, saveDialog.FileName).ContinueWith(task =>
+                    {
+                        if (task.IsFaulted)
+                        {
+                            MessageBox.Show($"Failed to save preset: {task.Exception?.InnerException?.Message}",
+                                "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                            StatusMessage = "Error saving preset";
+                        }
+                        else
+                        {
+                            MessageBox.Show($"Preset '{presetName}' exported successfully!", "Export Complete",
+                                MessageBoxButton.OK, MessageBoxImage.Information);
+                            StatusMessage = $"Exported group '{activeGroup.Name}' as preset '{presetName}'";
+                        }
+                    }, TaskScheduler.FromCurrentSynchronizationContext());
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to export group as preset: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusMessage = $"Error: {ex.Message}";
+        }
+    }
+
     private async void ExecuteImportImage()
     {
         try
@@ -1122,13 +1492,13 @@ public class MainViewModel : ViewModelBase
 
             var grid = CurrentWorkspace.Grid;
             var sb = new StringBuilder();
-            sb.AppendLine("Grid Features Summary");
-            sb.AppendLine(new string('=', 60));
+            sb.AppendLine("Grid Features Analysis");
+            sb.AppendLine(new string('=', 80));
             sb.AppendLine();
 
             // Grid Dimensions
             sb.AppendLine("Grid Dimensions:");
-            sb.AppendLine(new string('-', 60));
+            sb.AppendLine(new string('-', 80));
             sb.AppendLine($"Width:  {grid.Size.Width,6} cells");
             sb.AppendLine($"Height: {grid.Size.Height,6} cells");
             sb.AppendLine($"Total:  {grid.Size.Width * grid.Size.Height,6} cells");
@@ -1140,16 +1510,22 @@ public class MainViewModel : ViewModelBase
             var emptyCells = allCells.Count - filledCells.Count;
 
             sb.AppendLine("Cell Statistics:");
-            sb.AppendLine(new string('-', 60));
+            sb.AppendLine(new string('-', 80));
             sb.AppendLine($"Filled Cells:    {filledCells.Count,6} ({(double)filledCells.Count / allCells.Count * 100:F1}%)");
             sb.AppendLine($"Empty Cells:     {emptyCells,6} ({(double)emptyCells / allCells.Count * 100:F1}%)");
+
+            if (filledCells.Count == 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("  ℹ️  Grid is empty. Place some squares to see statistics.");
+            }
             sb.AppendLine();
 
             // Square Type Distribution
             if (filledCells.Any())
             {
                 sb.AppendLine("Square Type Distribution:");
-                sb.AppendLine(new string('-', 60));
+                sb.AppendLine(new string('-', 80));
                 var squareGroups = filledCells
                     .GroupBy(c => c.Square!.Type)
                     .OrderByDescending(g => g.Count());
@@ -1157,7 +1533,7 @@ public class MainViewModel : ViewModelBase
                 foreach (var group in squareGroups)
                 {
                     var percentage = (double)group.Count() / filledCells.Count * 100;
-                    sb.AppendLine($"{group.Key,-15} {group.Count(),6} ({percentage:F1}%)");
+                    sb.AppendLine($"  {group.Key,-20} {group.Count(),6} ({percentage:F1}%)");
                 }
                 sb.AppendLine();
             }
@@ -1167,7 +1543,7 @@ public class MainViewModel : ViewModelBase
             if (entities.Any())
             {
                 sb.AppendLine("Entity Statistics:");
-                sb.AppendLine(new string('-', 60));
+                sb.AppendLine(new string('-', 80));
                 sb.AppendLine($"Total Entities:  {entities.Count,6}");
 
                 var entityGroups = entities
@@ -1176,67 +1552,178 @@ public class MainViewModel : ViewModelBase
 
                 foreach (var group in entityGroups)
                 {
-                    sb.AppendLine($"{group.Key,-15} {group.Count(),6}");
+                    sb.AppendLine($"  {group.Key,-20} {group.Count(),6}");
                 }
                 sb.AppendLine();
             }
 
-            // Branch Detection Features (if available)
-            if (Endpoints != null || Bifurcations != null || Crossings != null)
+            // Call GridFeaturesService to calculate metrics
+            var gridFeatures = _gridFeaturesService.CalculateGridFeatures(
+                grid.Size.Width,
+                grid.Size.Height,
+                filledCells.Count,
+                entities.Count,
+                Endpoints,
+                Bifurcations,
+                Crossings,
+                SkeletonMatrix
+            );
+
+            // Display GridFeatures metrics
+            sb.AppendLine("Biometric Features:");
+            sb.AppendLine(new string('-', 80));
+            if (gridFeatures.TotalBranchPoints == 0 && SkeletonMatrix == null)
             {
-                sb.AppendLine("Structural Features (Branch Detection):");
-                sb.AppendLine(new string('-', 60));
-                if (Endpoints != null)
-                    sb.AppendLine($"Endpoints:       {Endpoints.Count,6}");
-                if (Bifurcations != null)
-                    sb.AppendLine($"Bifurcations:    {Bifurcations.Count,6}");
-                if (Crossings != null)
-                    sb.AppendLine($"Crossings:       {Crossings.Count,6}");
-
-                var totalBranch = (Endpoints?.Count ?? 0) + (Bifurcations?.Count ?? 0) + (Crossings?.Count ?? 0);
-                if (totalBranch > 0)
-                {
-                    sb.AppendLine($"Total Branch Points: {totalBranch,6}");
-                }
-                sb.AppendLine();
+                sb.AppendLine("  ⚠️ No biometric data available");
+                sb.AppendLine("  Run: Biometrics → Skeletonization → Branch Detection to generate features");
             }
-
-            // Skeleton Statistics (if available)
-            if (SkeletonMatrix != null)
+            else
             {
-                int skeletonPixels = 0;
-                int rows = SkeletonMatrix.GetLength(0);
-                int cols = SkeletonMatrix.GetLength(1);
-
-                for (int y = 0; y < rows; y++)
-                {
-                    for (int x = 0; x < cols; x++)
-                    {
-                        if (SkeletonMatrix[y, x] == 1)
-                            skeletonPixels++;
-                    }
-                }
-
-                sb.AppendLine("Skeleton Statistics:");
-                sb.AppendLine(new string('-', 60));
-                sb.AppendLine($"Skeleton Pixels: {skeletonPixels,6}");
-                sb.AppendLine($"Coverage:        {(double)skeletonPixels / (rows * cols) * 100:F2}%");
-                sb.AppendLine();
+                sb.AppendLine($"Total Branch Points: {gridFeatures.TotalBranchPoints,6}");
+                sb.AppendLine($"  Endpoints:        {gridFeatures.EndpointCount,6}");
+                sb.AppendLine($"  Bifurcations:     {gridFeatures.BifurcationCount,6}");
+                sb.AppendLine($"  Crossings:        {gridFeatures.CrossingCount,6}");
             }
-
-            // Group Information
-            sb.AppendLine("Active Group:");
-            sb.AppendLine(new string('-', 60));
-            sb.AppendLine($"Name: {CurrentWorkspace.ActiveGroup.Name}");
             sb.AppendLine();
 
-            MessageBox.Show(sb.ToString(), "Grid Features", MessageBoxButton.OK, MessageBoxImage.Information);
-            StatusMessage = "Grid features displayed";
+            sb.AppendLine("Skeleton Statistics:");
+            sb.AppendLine(new string('-', 80));
+            if (gridFeatures.TotalSkeletonPixels == 0)
+            {
+                sb.AppendLine("  ⚠️ No skeleton data");
+                sb.AppendLine("  Run: Biometrics → Skeletonization to generate skeleton");
+            }
+            else
+            {
+                sb.AppendLine($"Skeleton Pixels:     {gridFeatures.TotalSkeletonPixels,6}");
+                sb.AppendLine($"Coverage:            {(double)gridFeatures.TotalSkeletonPixels / (grid.Size.Width * grid.Size.Height) * 100:F2}%");
+            }
+            sb.AppendLine();
+
+            sb.AppendLine("Complexity Metrics:");
+            sb.AppendLine(new string('-', 80));
+            if (gridFeatures.TotalSkeletonPixels > 0)
+            {
+                sb.AppendLine($"Branch Density:      {gridFeatures.BranchDensity:F2} points/100px");
+                sb.AppendLine($"Branch Complexity:   {gridFeatures.BranchComplexity:F2} (weighted)");
+                if (Endpoints != null && Endpoints.Any())
+                {
+                    sb.AppendLine($"Avg Endpoint Dist:   {gridFeatures.AverageEndpointDistance:F2} cells");
+                }
+                if (Bifurcations != null && Bifurcations.Any())
+                {
+                    sb.AppendLine($"Avg Bifurcation Dist:{gridFeatures.AverageBifurcationDistance:F2} cells");
+                }
+                sb.AppendLine($"Overall Complexity:  {gridFeatures.ComplexityScore:F4}");
+            }
+            else
+            {
+                sb.AppendLine("  ⚠️ Complexity metrics require skeleton data");
+            }
+            sb.AppendLine();
+
+            // Summary with Feature Status
+            sb.AppendLine("Summary:");
+            sb.AppendLine(new string('-', 80));
+            sb.AppendLine($"Workspace Size:      {grid.Size.Width} x {grid.Size.Height}");
+            sb.AppendLine($"Squares:             {filledCells.Count}");
+            sb.AppendLine($"Entities:            {entities.Count}");
+            sb.AppendLine($"Branch Points:       {gridFeatures.TotalBranchPoints}");
+            sb.AppendLine();
+
+            sb.AppendLine("Feature Status:");
+            sb.AppendLine(new string('-', 80));
+            sb.AppendLine($"{(filledCells.Count > 0 ? "✓" : "○")} Squares:           {(filledCells.Count > 0 ? "Placed" : "Empty grid")}");
+            sb.AppendLine($"{(entities.Any() ? "✓" : "○")} Entities:          {(entities.Any() ? "Present" : "None")}");
+            sb.AppendLine($"{(SkeletonMatrix != null ? "✓" : "○")} Skeleton:          {(SkeletonMatrix != null ? "Generated" : "Not generated")}");
+            sb.AppendLine($"{(gridFeatures.TotalBranchPoints > 0 ? "✓" : "○")} Branch Detection:  {(gridFeatures.TotalBranchPoints > 0 ? "Complete" : "Not run")}");
+            sb.AppendLine();
+
+            MessageBox.Show(sb.ToString(), "Grid Features Analysis", MessageBoxButton.OK, MessageBoxImage.Information);
+            StatusMessage = "Grid features analysis displayed";
         }
         catch (Exception ex)
         {
             MessageBox.Show($"Failed to display grid features: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             StatusMessage = $"Error: {ex.Message}";
+        }
+    }
+
+    private void ExecuteRotateSquareToolLeft()
+    {
+        CurrentSquareRotation = (CurrentSquareRotation - 45 + 360) % 360;
+        StatusMessage = $"Square rotation: {CurrentSquareRotation}°";
+    }
+
+    private void ExecuteRotateSquareToolRight()
+    {
+        CurrentSquareRotation = (CurrentSquareRotation + 45) % 360;
+        StatusMessage = $"Square rotation: {CurrentSquareRotation}°";
+    }
+
+    private void UpdateSquareToolRotationFromBranchDetection(List<(int x, int y)>? endpoints)
+    {
+        if (endpoints == null || endpoints.Count == 0)
+            return;
+
+        // Calculate rotation based on endpoint directions
+        // Strategy: Calculate average direction vector from endpoints to image center
+        if (endpoints.Count == 1)
+        {
+            // Single endpoint: use direction from endpoint to center
+            var ep = endpoints[0];
+            var centerX = SkeletonMatrix?.GetLength(1) / 2 ?? 0;
+            var centerY = SkeletonMatrix?.GetLength(0) / 2 ?? 0;
+
+            int dx = centerX - ep.x;
+            int dy = centerY - ep.y;
+
+            // Calculate angle in degrees (atan2 returns radians)
+            double angle = Math.Atan2(dy, dx) * 180 / Math.PI;
+
+            // Normalize to 0-360 range and round to nearest 45 degrees
+            angle = (angle + 360) % 360;
+            int rotation = (int)((angle + 22.5) / 45) * 45 % 360;
+
+            CurrentSquareRotation = rotation;
+            StatusMessage = $"Rotation auto-updated to {rotation}° (1 endpoint detected)";
+        }
+        else if (endpoints.Count == 2)
+        {
+            // Two endpoints: use direction between them
+            var ep1 = endpoints[0];
+            var ep2 = endpoints[1];
+
+            int dx = ep2.x - ep1.x;
+            int dy = ep2.y - ep1.y;
+
+            double angle = Math.Atan2(dy, dx) * 180 / Math.PI;
+            angle = (angle + 360) % 360;
+            int rotation = (int)((angle + 22.5) / 45) * 45 % 360;
+
+            CurrentSquareRotation = rotation;
+            StatusMessage = $"Rotation auto-updated to {rotation}° (2 endpoints detected)";
+        }
+        else
+        {
+            // Multiple endpoints: use average direction
+            double sumAngle = 0;
+            var centerX = SkeletonMatrix?.GetLength(1) / 2.0 ?? 0;
+            var centerY = SkeletonMatrix?.GetLength(0) / 2.0 ?? 0;
+
+            foreach (var ep in endpoints)
+            {
+                int dx = (int)(centerX - ep.x);
+                int dy = (int)(centerY - ep.y);
+                sumAngle += Math.Atan2(dy, dx);
+            }
+
+            double avgAngle = (sumAngle / endpoints.Count) * 180 / Math.PI;
+            avgAngle = (avgAngle + 360) % 360;
+            int rotation = (int)((avgAngle + 22.5) / 45) * 45 % 360;
+
+            CurrentSquareRotation = rotation;
+            StatusMessage = $"Rotation auto-updated to {rotation}° ({endpoints.Count} endpoints detected)";
         }
     }
 }

@@ -6,13 +6,14 @@ namespace MapEditor.Domain.Editing.Entities;
 /// <summary>
 /// Workspace - Główny agregat reprezentujący całą przestrzeń roboczą (Aggregate Root)
 /// </summary>
-public class Workspace
+public partial class Workspace
 {
     public Guid Id { get; private set; }
     public string Name { get; private set; }
     public Grid2D Grid { get; private set; }
     public List<Group> Groups { get; private set; }
     public IEnumerable<Entity> Entities => Groups.SelectMany(g => g.Entities.Values);
+    public Selection Selection { get; private set; }
     public DateTime CreatedAt { get; private set; }
     public DateTime ModifiedAt { get; private set; }
 
@@ -27,6 +28,7 @@ public class Workspace
         Name = name;
         Grid = new Grid2D(size);
         Groups = new List<Group>();
+        Selection = Selection.Empty();
         CreatedAt = DateTime.UtcNow;
         ModifiedAt = DateTime.UtcNow;
 
@@ -57,6 +59,36 @@ public class Workspace
             throw new InvalidOperationException($"Group with name '{group.Name}' already exists");
 
         Groups.Add(group);
+        UpdateModifiedTime();
+    }
+
+    public void RemoveGroup(Group group)
+    {
+        if (group == null)
+            throw new ArgumentNullException(nameof(group));
+
+        if (!Groups.Contains(group))
+            throw new ArgumentException("Group does not belong to this workspace", nameof(group));
+
+        // Cannot remove if it's the last group
+        if (Groups.Count <= 1)
+            throw new InvalidOperationException("Cannot remove the last group from workspace");
+
+        // If removing active group, switch to another group
+        if (_activeGroup == group)
+        {
+            var nextGroup = Groups.FirstOrDefault(g => g != group);
+            if (nextGroup != null)
+            {
+                SetActiveGroup(nextGroup);
+            }
+        }
+
+        // Clear group contents before removal
+        group.Clear();
+
+        // Remove from list
+        Groups.Remove(group);
         UpdateModifiedTime();
     }
 
@@ -130,6 +162,17 @@ public class Workspace
 
                 // Also place in active group (for rendering and layer isolation)
                 ActiveGroup.PlaceSquare(absolutePosition, squareDef.Type, squareDef.Rotation);
+            }
+        }
+
+        // Place all entities from preset at specified position
+        foreach (var entityDef in preset.Entities)
+        {
+            var absolutePosition = entityDef.GetAbsolutePosition(position);
+
+            if (Grid.IsValidPosition(absolutePosition))
+            {
+                ActiveGroup.PlaceEntity(absolutePosition, entityDef.Type, entityDef.Name);
             }
         }
 

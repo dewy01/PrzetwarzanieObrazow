@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using MapEditor.Domain.Editing.Entities;
+using GridPoint = MapEditor.Domain.Editing.ValueObjects.Point;
 using MapEditor.Domain.Shared.Enums;
 
 namespace MapEditor.Presentation.Controls;
@@ -25,6 +26,10 @@ public class GridCanvas : Canvas
     private bool _showBifurcations = true;
     private bool _showCrossings = true;
     private bool _showBranchAnnotations = false;
+    private bool _isSelecting = false;
+    private GridPoint? _selectionStart;
+    private List<Infrastructure.Algorithms.Canvas>? _canvases;
+    private bool _showCanvases = false;
 
     public static readonly DependencyProperty WorkspaceProperty =
         DependencyProperty.Register(
@@ -74,6 +79,14 @@ public class GridCanvas : Canvas
     public static readonly DependencyProperty ShowBranchAnnotationsProperty =
         DependencyProperty.Register(nameof(ShowBranchAnnotations), typeof(bool), typeof(GridCanvas),
             new PropertyMetadata(false, OnBranchDataChanged));
+
+    public static readonly DependencyProperty CanvasesProperty =
+        DependencyProperty.Register(nameof(Canvases), typeof(List<Infrastructure.Algorithms.Canvas>), typeof(GridCanvas),
+            new PropertyMetadata(null, OnCanvasesChanged));
+
+    public static readonly DependencyProperty ShowCanvasesProperty =
+        DependencyProperty.Register(nameof(ShowCanvases), typeof(bool), typeof(GridCanvas),
+            new PropertyMetadata(false, OnCanvasesChanged));
 
     public Workspace? Workspace
     {
@@ -135,14 +148,29 @@ public class GridCanvas : Canvas
         set => SetValue(ShowBranchAnnotationsProperty, value);
     }
 
+    public List<Infrastructure.Algorithms.Canvas>? Canvases
+    {
+        get => (List<Infrastructure.Algorithms.Canvas>?)GetValue(CanvasesProperty);
+        set => SetValue(CanvasesProperty, value);
+    }
+
+    public bool ShowCanvases
+    {
+        get => (bool)GetValue(ShowCanvasesProperty);
+        set => SetValue(ShowCanvasesProperty, value);
+    }
+
     public event EventHandler<CellClickedEventArgs>? CellLeftClicked;
     public event EventHandler<CellClickedEventArgs>? CellRightClicked;
+    public event EventHandler<SelectionChangedEventArgs>? SelectionChanged;
 
     public GridCanvas()
     {
         Background = new SolidColorBrush(Color.FromRgb(240, 240, 240));
         MouseLeftButtonDown += OnMouseLeftButtonDown;
         MouseRightButtonDown += OnMouseRightButtonDown;
+        MouseMove += OnMouseMove;
+        MouseLeftButtonUp += OnMouseLeftButtonUp;
     }
 
     private static void OnWorkspaceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -187,6 +215,16 @@ public class GridCanvas : Canvas
         }
     }
 
+    private static void OnCanvasesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is GridCanvas canvas)
+        {
+            canvas._canvases = canvas.Canvases;
+            canvas._showCanvases = canvas.ShowCanvases;
+            canvas.RenderGrid();
+        }
+    }
+
     private void RenderGrid()
     {
         Children.Clear();
@@ -227,32 +265,49 @@ public class GridCanvas : Canvas
             Children.Add(line);
         }
 
-        // Rysuj squares from active group
-        foreach (var kvp in _workspace.ActiveGroup.Elements)
+        // Rysuj squares from all groups (inactive with 50% opacity)
+        foreach (var group in _workspace.Groups)
         {
-            var position = kvp.Key;
-            var square = kvp.Value;
+            bool isActiveGroup = group == _workspace.ActiveGroup;
+            double opacity = isActiveGroup ? 1.0 : 0.5;
 
-            // Draw the square
-            var rect = new Rectangle
+            foreach (var kvp in group.Elements)
             {
-                Width = CellSize - 2,
-                Height = CellSize - 2,
-                Fill = GetBrushForSquareType(square.Type),
-                Stroke = Brushes.Black,
-                StrokeThickness = 1
-            };
+                var position = kvp.Key;
+                var square = kvp.Value;
 
-            SetLeft(rect, position.X * CellSize + 1);
-            SetTop(rect, position.Y * CellSize + 1);
+                // Draw the square
+                var rect = new Rectangle
+                {
+                    Width = CellSize - 2,
+                    Height = CellSize - 2,
+                    Fill = GetBrushForSquareType(square.Type),
+                    Stroke = isActiveGroup ? Brushes.Black : Brushes.Gray,
+                    StrokeThickness = 1,
+                    Opacity = opacity
+                };
 
-            Children.Add(rect);
-        }
+                SetLeft(rect, position.X * CellSize + 1);
+                SetTop(rect, position.Y * CellSize + 1);
 
-        // Rysuj entities tylko z aktywnej grupy (spójne z kwadratami)
-        foreach (var entity in _workspace.ActiveGroup.Entities.Values)
-        {
-            DrawEntity(entity);
+                // Apply rotation if not 0
+                if (square.Rotation != 0)
+                {
+                    var rotateTransform = new RotateTransform(square.Rotation);
+                    // Set rotation center to middle of the square
+                    rotateTransform.CenterX = (CellSize - 2) / 2.0;
+                    rotateTransform.CenterY = (CellSize - 2) / 2.0;
+                    rect.RenderTransform = rotateTransform;
+                }
+
+                Children.Add(rect);
+            }
+
+            // Rysuj entities from this group
+            foreach (var entity in group.Entities.Values)
+            {
+                DrawEntity(entity, opacity, isActiveGroup);
+            }
         }
 
         // Rysuj nakładkę szkieletu
@@ -261,8 +316,17 @@ public class GridCanvas : Canvas
             DrawSkeletonOverlay(_skeletonMatrix);
         }
 
+        // Rysuj canvases
+        if (_showCanvases && _canvases != null)
+        {
+            DrawCanvasOverlays(_canvases);
+        }
+
         // Rysuj branch points
         DrawBranchPointOverlays();
+
+        // Rysuj zaznaczenie (Selection)
+        DrawSelectionOverlay();
     }
 
     private Brush GetBrushForSquareType(SquareType type)
@@ -280,7 +344,7 @@ public class GridCanvas : Canvas
         };
     }
 
-    private void DrawEntity(Entity entity)
+    private void DrawEntity(Entity entity, double opacity = 1.0, bool isActive = true)
     {
         // Draw entity as circle
         var ellipse = new System.Windows.Shapes.Ellipse
@@ -288,7 +352,8 @@ public class GridCanvas : Canvas
             Width = CellSize - 10,
             Height = CellSize - 10,
             Fill = GetBrushForEntityType(entity.Type),
-            Stroke = Brushes.Black,
+            Opacity = opacity,
+            Stroke = isActive ? Brushes.Black : Brushes.Gray,
             StrokeThickness = 2
         };
 
@@ -403,18 +468,32 @@ public class GridCanvas : Canvas
         // Draw annotation text if enabled
         if (_showBranchAnnotations)
         {
-            var textBlock = new System.Windows.Controls.TextBlock
+            // Draw label letter (E/B/C)
+            var labelBlock = new System.Windows.Controls.TextBlock
             {
                 Text = label,
-                FontSize = 10,
+                FontSize = 12,
                 FontWeight = FontWeights.Bold,
                 Foreground = Brushes.White,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            SetLeft(textBlock, x * CellSize + CellSize / 2 - 3);
-            SetTop(textBlock, y * CellSize + CellSize / 2 - 6);
-            Children.Add(textBlock);
+            SetLeft(labelBlock, x * CellSize + CellSize / 2 - 4);
+            SetTop(labelBlock, y * CellSize + CellSize / 2 - 8);
+            Children.Add(labelBlock);
+
+            // Draw coordinate label below
+            var coordBlock = new System.Windows.Controls.TextBlock
+            {
+                Text = $"({x},{y})",
+                FontSize = 8,
+                Foreground = new SolidColorBrush(color),
+                Background = new SolidColorBrush(Color.FromArgb(180, 0, 0, 0)),
+                Padding = new Thickness(2, 0, 2, 0)
+            };
+            SetLeft(coordBlock, x * CellSize + 2);
+            SetTop(coordBlock, (y + 1) * CellSize - 12);
+            Children.Add(coordBlock);
         }
     }
 
@@ -429,8 +508,21 @@ public class GridCanvas : Canvas
 
         if (_workspace.Grid.IsValidPosition(x, y))
         {
-            CellLeftClicked?.Invoke(this, new CellClickedEventArgs(x, y));
-            RenderGrid(); // Re-render after change
+            // Hold Shift to start selection rectangle
+            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+            {
+                _isSelecting = true;
+                _selectionStart = new GridPoint(x, y);
+                _workspace.SetSelection(_selectionStart, _selectionStart);
+                SelectionChanged?.Invoke(this, new SelectionChangedEventArgs(_workspace.Selection.Width, _workspace.Selection.Height, _workspace.Selection.Area));
+                CaptureMouse();
+                RenderGrid();
+            }
+            else
+            {
+                CellLeftClicked?.Invoke(this, new CellClickedEventArgs(x, y));
+                RenderGrid(); // Re-render after change
+            }
         }
     }
 
@@ -450,10 +542,122 @@ public class GridCanvas : Canvas
         }
     }
 
+    private void OnMouseMove(object? sender, MouseEventArgs e)
+    {
+        if (_workspace == null || !_isSelecting || _selectionStart == null)
+            return;
+
+        var pos = e.GetPosition(this);
+        int x = Math.Max(0, Math.Min((int)(pos.X / CellSize), _workspace.Grid.Size.Width - 1));
+        int y = Math.Max(0, Math.Min((int)(pos.Y / CellSize), _workspace.Grid.Size.Height - 1));
+
+        var current = new GridPoint(x, y);
+        _workspace.SetSelection(_selectionStart, current);
+        SelectionChanged?.Invoke(this, new SelectionChangedEventArgs(_workspace.Selection.Width, _workspace.Selection.Height, _workspace.Selection.Area));
+        RenderGrid();
+    }
+
+    private void OnMouseLeftButtonUp(object? sender, MouseButtonEventArgs e)
+    {
+        if (_isSelecting)
+        {
+            _isSelecting = false;
+            _selectionStart = null;
+            ReleaseMouseCapture();
+            SelectionChanged?.Invoke(this, new SelectionChangedEventArgs(_workspace!.Selection.Width, _workspace.Selection.Height, _workspace.Selection.Area));
+            RenderGrid();
+        }
+    }
+
     // Metoda do odświeżania po zmianach zewnętrznych
     public void Refresh()
     {
         RenderGrid();
+    }
+
+    private void DrawSelectionOverlay()
+    {
+        if (_workspace == null || _workspace.Selection == null || !_workspace.Selection.IsActive)
+            return;
+
+        var sel = _workspace.Selection;
+        var start = sel.StartPoint;
+        var end = sel.EndPoint;
+
+        int x = Math.Min(start.X, end.X);
+        int y = Math.Min(start.Y, end.Y);
+        int w = Math.Abs(end.X - start.X) + 1;
+        int h = Math.Abs(end.Y - start.Y) + 1;
+
+        // Overlay background
+        var overlay = new Rectangle
+        {
+            Width = w * CellSize,
+            Height = h * CellSize,
+            Fill = new SolidColorBrush(Color.FromArgb(60, 30, 144, 255)), // semi-transparent DodgerBlue
+            Stroke = Brushes.DodgerBlue,
+            StrokeThickness = 2,
+            StrokeDashArray = new DoubleCollection { 4, 2 }
+        };
+        SetLeft(overlay, x * CellSize);
+        SetTop(overlay, y * CellSize);
+        Children.Add(overlay);
+    }
+
+    private void DrawCanvasOverlays(List<Infrastructure.Algorithms.Canvas> canvases)
+    {
+        if (canvases == null || canvases.Count == 0)
+            return;
+
+        // Use different colors for each canvas (cycling through a palette)
+        var colors = new[]
+        {
+            Color.FromArgb(80, 255, 0, 0),     // Red
+            Color.FromArgb(80, 0, 0, 255),     // Blue
+            Color.FromArgb(80, 0, 255, 0),     // Green
+            Color.FromArgb(80, 255, 255, 0),   // Yellow
+            Color.FromArgb(80, 255, 0, 255),   // Magenta
+            Color.FromArgb(80, 0, 255, 255),   // Cyan
+        };
+
+        for (int i = 0; i < canvases.Count; i++)
+        {
+            var canvas = canvases[i];
+            var color = colors[i % colors.Length];
+
+            foreach (var cell in canvas.Cells)
+            {
+                var rect = new Rectangle
+                {
+                    Width = CellSize - 2,
+                    Height = CellSize - 2,
+                    Fill = new SolidColorBrush(color),
+                    Stroke = Brushes.Transparent
+                };
+                SetLeft(rect, cell.X * CellSize + 1);
+                SetTop(rect, cell.Y * CellSize + 1);
+                Children.Add(rect);
+            }
+
+            // Draw canvas ID label at center
+            var bbox = canvas.GetBoundingBox();
+            int centerX = (bbox.minX + bbox.maxX) / 2;
+            int centerY = (bbox.minY + bbox.maxY) / 2;
+
+            var label = new System.Windows.Controls.TextBlock
+            {
+                Text = $"#{canvas.Id}\n{canvas.Size} cells",
+                FontSize = 10,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                Background = new SolidColorBrush(Color.FromArgb(180, 0, 0, 0)),
+                Padding = new Thickness(3),
+                TextAlignment = System.Windows.TextAlignment.Center
+            };
+            SetLeft(label, centerX * CellSize);
+            SetTop(label, centerY * CellSize);
+            Children.Add(label);
+        }
     }
 }
 
@@ -466,5 +670,19 @@ public class CellClickedEventArgs : EventArgs
     {
         X = x;
         Y = y;
+    }
+}
+
+public class SelectionChangedEventArgs : EventArgs
+{
+    public int Width { get; }
+    public int Height { get; }
+    public int Area { get; }
+
+    public SelectionChangedEventArgs(int width, int height, int area)
+    {
+        Width = width;
+        Height = height;
+        Area = area;
     }
 }

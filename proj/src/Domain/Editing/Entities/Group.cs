@@ -126,5 +126,14 @@ public class Group
         return Elements.ContainsKey(position);
     }
 
+    /// <summary>
+    /// Clear all squares and entities from this group (for deletion)
+    /// </summary>
+    public void Clear()
+    {
+        Elements.Clear();
+        Entities.Clear();
+    }
+
     public override string ToString() => $"Group: {Name} (Active: {IsActive}, Squares: {Elements.Count}, Entities: {Entities.Count})";
 }

@@ -76,6 +76,13 @@ public class PresetFileRepository : IPresetRepository
                 Y = s.RelativePosition.Y,
                 Type = s.Type,
                 Rotation = s.Rotation
+            }).ToList(),
+            Entities = preset.Entities.Select(e => new EntityDefinitionDto
+            {
+                X = e.RelativePosition.X,
+                Y = e.RelativePosition.Y,
+                Type = e.Type,
+                Name = e.Name
             }).ToList()
         };
     }
@@ -89,8 +96,13 @@ public class PresetFileRepository : IPresetRepository
             s.Type,
             s.Rotation
         )).ToList();
+        var entities = (dto.Entities ?? new List<EntityDefinitionDto>()).Select(e => new EntityDefinition(
+            new Point(e.X, e.Y),
+            e.Type,
+            e.Name
+        )).ToList();
 
-        return new Preset(dto.Name, size, squares, origin);
+        return new Preset(dto.Name, size, squares, entities, origin);
     }
 
     // Data Transfer Objects
@@ -104,6 +116,7 @@ public class PresetFileRepository : IPresetRepository
         public int OriginY { get; set; }
         public DateTime CreatedAt { get; set; }
         public List<SquareDefinitionDto> Squares { get; set; } = new();
+        public List<EntityDefinitionDto>? Entities { get; set; } = new();
     }
 
     private class SquareDefinitionDto
@@ -112,5 +125,13 @@ public class PresetFileRepository : IPresetRepository
         public int Y { get; set; }
         public SquareType Type { get; set; }
         public int Rotation { get; set; }
+    }
+
+    private class EntityDefinitionDto
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+        public EntityType Type { get; set; }
+        public string? Name { get; set; }
     }
 }

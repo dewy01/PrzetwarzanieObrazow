@@ -19,18 +19,28 @@ public class UL22Converter : IUL22Converter
 
         var grid = workspace.Grid;
 
-        // Iterate through all cells in the grid, but only use active group's squares for conversion
+        // Iterate through all cells in the grid
+        // According to ALGORITHMS.md specification:
+        // - 0 = tło (Background) - empty cells
+        // - 1 = obiekt (Map/Square) - cells with squares (to be skeletonized)
         for (int y = 0; y < grid.Size.Height; y++)
         {
             for (int x = 0; x < grid.Size.Width; x++)
             {
-                // Check if the active group has a square at this position
+                // Check if ANY group has a square at this position
                 var position = new MapEditor.Domain.Editing.ValueObjects.Point(x, y);
-                if (workspace.ActiveGroup.HasSquare(position))
+                bool hasSquare = workspace.Groups.Any(g => g.HasSquare(position));
+
+                if (hasSquare)
                 {
+                    // Object (square) - marked as 1 (will be skeletonized)
                     matrix[y, x] = 1;
                 }
-                // Otherwise it remains 0 (default value)
+                else
+                {
+                    // Background (empty cells) - marked as 0
+                    matrix[y, x] = 0;
+                }
             }
         }
 

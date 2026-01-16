@@ -47,6 +47,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IFragmentationService, FragmentationService>();
         services.AddSingleton<ISkeletonizationService, SkeletonizationService>();
         services.AddSingleton<IBranchDetectionService, BranchDetectionService>();
+        services.AddSingleton<IGridFeaturesService, GridFeaturesService>();
 
         // Application Services
         services.AddSingleton<UndoRedoService>();

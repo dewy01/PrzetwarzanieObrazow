@@ -66,7 +66,7 @@ public class PresetTests
         var origin = new Point(10, 10);
 
         // Act
-        var preset = new Preset(name, size, squares, origin);
+        var preset = new Preset(name, size, squares, null, origin);
 
         // Assert
         Assert.Equal(origin, preset.OriginPoint);

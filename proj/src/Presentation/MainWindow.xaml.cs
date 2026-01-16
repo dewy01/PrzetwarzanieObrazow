@@ -21,6 +21,16 @@ public partial class MainWindow : Window
         {
             gridCanvas.CellLeftClicked += OnCellLeftClicked;
             gridCanvas.CellRightClicked += OnCellRightClicked;
+            gridCanvas.SelectionChanged += (s, e) =>
+            {
+                if (DataContext is MainViewModel vm)
+                {
+                    vm.SelectionWidth = e.Width;
+                    vm.SelectionHeight = e.Height;
+                    vm.SelectionArea = e.Area;
+                    vm.StatusMessage = $"Selection: {e.Width}×{e.Height} ({e.Area})";
+                }
+            };
         }
 
         // Wire up ViewModel events

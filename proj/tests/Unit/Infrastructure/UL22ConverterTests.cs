@@ -19,13 +19,13 @@ public class UL22ConverterTests
     [Fact]
     public void ConvertToUL22_WithEmptyWorkspace_ReturnsAllZeros()
     {
-        // Arrange
+        // Arrange - Empty workspace has no squares, so all cells are background
         var workspace = new Workspace("Test", new Size(10, 8));
 
         // Act
         var matrix = _converter.ConvertToUL22(workspace);
 
-        // Assert
+        // Assert - Per ALGORITHMS.md: Background (empty cells) = 0
         Assert.Equal(8, matrix.GetLength(0)); // rows
         Assert.Equal(10, matrix.GetLength(1)); // columns
 
@@ -33,7 +33,7 @@ public class UL22ConverterTests
         {
             for (int x = 0; x < 10; x++)
             {
-                Assert.Equal(0, matrix[y, x]);
+                Assert.Equal(0, matrix[y, x]); // All background = 0
             }
         }
     }
@@ -48,19 +48,19 @@ public class UL22ConverterTests
         // Act
         var matrix = _converter.ConvertToUL22(workspace);
 
-        // Assert
+        // Assert - Per ALGORITHMS.md: Squares (objects) = 1, Background = 0
         Assert.Equal(5, matrix.GetLength(0));
         Assert.Equal(5, matrix.GetLength(1));
-        Assert.Equal(1, matrix[2, 2]);
+        Assert.Equal(1, matrix[2, 2]); // Square = 1
 
-        // Check that all other cells are 0
+        // Check that all other cells are 0 (background)
         for (int y = 0; y < 5; y++)
         {
             for (int x = 0; x < 5; x++)
             {
                 if (x == 2 && y == 2)
                     continue;
-                Assert.Equal(0, matrix[y, x]);
+                Assert.Equal(0, matrix[y, x]); // Background = 0
             }
         }
     }
@@ -78,17 +78,17 @@ public class UL22ConverterTests
         // Act
         var matrix = _converter.ConvertToUL22(workspace);
 
-        // Assert
+        // Assert - Per ALGORITHMS.md: Squares = 1, Background = 0
         Assert.Equal(4, matrix.GetLength(0));
         Assert.Equal(4, matrix.GetLength(1));
 
-        // Check diagonal has 1s
+        // Check diagonal has 1s (squares)
         Assert.Equal(1, matrix[0, 0]);
         Assert.Equal(1, matrix[1, 1]);
         Assert.Equal(1, matrix[2, 2]);
         Assert.Equal(1, matrix[3, 3]);
 
-        // Check some empty cells are 0
+        // Check some non-square cells are 0 (background)
         Assert.Equal(0, matrix[0, 1]);
         Assert.Equal(0, matrix[1, 0]);
         Assert.Equal(0, matrix[3, 0]);
@@ -97,7 +97,7 @@ public class UL22ConverterTests
     [Fact]
     public void ConvertToUL22_WithFullGrid_ReturnsAllOnes()
     {
-        // Arrange
+        // Arrange - All cells have squares, so all are objects
         var workspace = new Workspace("Test", new Size(3, 3));
         for (int y = 0; y < 3; y++)
         {
@@ -110,7 +110,7 @@ public class UL22ConverterTests
         // Act
         var matrix = _converter.ConvertToUL22(workspace);
 
-        // Assert
+        // Assert - Per ALGORITHMS.md: All Squares = 1 (no background)
         Assert.Equal(3, matrix.GetLength(0));
         Assert.Equal(3, matrix.GetLength(1));
 
@@ -118,7 +118,7 @@ public class UL22ConverterTests
         {
             for (int x = 0; x < 3; x++)
             {
-                Assert.Equal(1, matrix[y, x]);
+                Assert.Equal(1, matrix[y, x]); // All squares = 1
             }
         }
     }
@@ -160,7 +160,7 @@ public class UL22ConverterTests
         // Act
         var matrix = _converter.ConvertToUL22(workspace);
 
-        // Assert
+        // Assert - Per ALGORITHMS.md: All Squares = 1, regardless of type
         for (int x = 0; x < 7; x++)
         {
             Assert.Equal(1, matrix[0, x]);

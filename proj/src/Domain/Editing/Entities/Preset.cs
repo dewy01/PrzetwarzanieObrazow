@@ -4,8 +4,8 @@ using MapEditor.Domain.Shared.Enums;
 namespace MapEditor.Domain.Editing.Entities;
 
 /// <summary>
-/// Preset - Predefiniowana konfiguracja wielu Square (Domain Entity)
-/// Reprezentuje wielokrotnie używalny szablon terenu
+/// Preset - Predefiniowana konfiguracja wielu Square i Entity (Domain Entity)
+/// Reprezentuje wielokrotnie używalny szablon terenu i obiektów
 /// </summary>
 public class Preset
 {
@@ -14,9 +14,10 @@ public class Preset
     public Point OriginPoint { get; private set; }
     public Size Size { get; private set; }
     public List<SquareDefinition> Squares { get; private set; }
+    public List<EntityDefinition> Entities { get; private set; }
     public DateTime CreatedAt { get; private set; }
 
-    public Preset(string name, Size size, List<SquareDefinition> squares, Point? originPoint = null)
+    public Preset(string name, Size size, List<SquareDefinition> squares, List<EntityDefinition>? entities = null, Point? originPoint = null)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Preset name cannot be empty", nameof(name));
@@ -28,6 +29,7 @@ public class Preset
         Name = name;
         Size = size;
         Squares = squares ?? new List<SquareDefinition>();
+        Entities = entities ?? new List<EntityDefinition>();
         OriginPoint = originPoint ?? new Point(0, 0);
         CreatedAt = DateTime.UtcNow;
     }
@@ -45,7 +47,7 @@ public class Preset
         OriginPoint = newOrigin ?? throw new ArgumentNullException(nameof(newOrigin));
     }
 
-    public override string ToString() => $"Preset: {Name} ({Size.Width}x{Size.Height}, {Squares.Count} squares)";
+    public override string ToString() => $"Preset: {Name} ({Size.Width}x{Size.Height}, {Squares.Count} squares, {Entities.Count} entities)";
 }
 
 /// <summary>
@@ -73,4 +75,34 @@ public class SquareDefinition
     }
 
     public override string ToString() => $"{Type} at {RelativePosition} (rot: {Rotation}°)";
+}
+
+/// <summary>
+/// Definicja pojedynczego Entity w Preset
+/// </summary>
+public class EntityDefinition
+{
+    public Point RelativePosition { get; private set; }
+    public EntityType Type { get; private set; }
+    public string? Name { get; private set; }
+
+    public EntityDefinition(Point relativePosition, EntityType type, string? name = null)
+    {
+        if (type == EntityType.None)
+            throw new ArgumentException("Entity type cannot be None", nameof(type));
+
+        RelativePosition = relativePosition ?? throw new ArgumentNullException(nameof(relativePosition));
+        Type = type;
+        Name = name;
+    }
+
+    public Point GetAbsolutePosition(Point presetOrigin)
+    {
+        return new Point(
+            presetOrigin.X + RelativePosition.X,
+            presetOrigin.Y + RelativePosition.Y
+        );
+    }
+
+    public override string ToString() => $"{Type} ({Name ?? "unnamed"}) at {RelativePosition}";
 }

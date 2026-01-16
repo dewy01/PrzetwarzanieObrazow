@@ -12,15 +12,17 @@ public class PlaceSquareCommand : IEditCommand
     private readonly Workspace _workspace;
     private readonly Point _position;
     private readonly SquareType _squareType;
+    private readonly int _rotation;
     private Square? _previousSquare;
 
     public string Description => $"Place {_squareType} at ({_position.X}, {_position.Y})";
 
-    public PlaceSquareCommand(Workspace workspace, Point position, SquareType squareType)
+    public PlaceSquareCommand(Workspace workspace, Point position, SquareType squareType, int rotation = 0)
     {
         _workspace = workspace ?? throw new ArgumentNullException(nameof(workspace));
         _position = position;
         _squareType = squareType;
+        _rotation = rotation;
     }
 
     public void Execute()
@@ -29,16 +31,16 @@ public class PlaceSquareCommand : IEditCommand
         var cell = _workspace.Grid.GetCell(_position);
         _previousSquare = cell.Square;
 
-        // Execute the command
-        _workspace.PlaceSquare(_position, _squareType);
+        // Execute the command with rotation
+        _workspace.ActiveGroup.PlaceSquare(_position, _squareType, _rotation);
     }
 
     public void Undo()
     {
         if (_previousSquare != null)
         {
-            // Restore previous square
-            _workspace.PlaceSquare(_position, _previousSquare.Type);
+            // Restore previous square with its rotation
+            _workspace.ActiveGroup.PlaceSquare(_position, _previousSquare.Type, _previousSquare.Rotation);
         }
         else
         {
@@ -253,6 +255,63 @@ public class PlacePresetCommand : IEditCommand
         foreach (var square in _previousSquares)
         {
             _workspace.PlaceSquare(square.Position, square.Type);
+        }
+    }
+}
+
+/// <summary>
+/// Command for removing a group from the workspace
+/// </summary>
+public class RemoveGroupCommand : IEditCommand
+{
+    private readonly Workspace _workspace;
+    private readonly Group _group;
+    private readonly int _previousIndex;
+    private readonly Group? _previousActiveGroup;
+    private readonly Dictionary<Point, Square> _removedSquares;
+    private readonly Dictionary<Point, Entity> _removedEntities;
+
+    public string Description => $"Remove group '{_group.Name}'";
+
+    public RemoveGroupCommand(Workspace workspace, Group group)
+    {
+        _workspace = workspace ?? throw new ArgumentNullException(nameof(workspace));
+        _group = group ?? throw new ArgumentNullException(nameof(group));
+        _previousIndex = workspace.Groups.IndexOf(group);
+        _previousActiveGroup = workspace.ActiveGroup != group ? workspace.ActiveGroup : null;
+        _removedSquares = new Dictionary<Point, Square>(_group.Elements);
+        _removedEntities = new Dictionary<Point, Entity>(_group.Entities);
+    }
+
+    public void Execute()
+    {
+        _workspace.RemoveGroup(_group);
+    }
+
+    public void Undo()
+    {
+        // Re-add the group
+        _workspace.Groups.Insert(_previousIndex, _group);
+
+        // Restore squares and entities
+        foreach (var kvp in _removedSquares)
+        {
+            _group.Elements[kvp.Key] = kvp.Value;
+        }
+
+        foreach (var kvp in _removedEntities)
+        {
+            _group.Entities[kvp.Key] = kvp.Value;
+        }
+
+        // Restore previous active group if different
+        if (_previousActiveGroup != null && _previousActiveGroup != _group)
+        {
+            _workspace.SetActiveGroup(_previousActiveGroup);
+        }
+        else if (_workspace.Groups.Contains(_group))
+        {
+            _workspace.SetActiveGroup(_group);
         }
     }
 }
